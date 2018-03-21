@@ -1,5 +1,5 @@
 from django.core.management.base import BaseCommand
-from django.db.models import get_models, get_app
+from django.apps import apps
 from django.contrib.auth.management import create_permissions
 
 
@@ -8,13 +8,18 @@ class Command(BaseCommand):
     help = 'reloads permissions for specified apps, or all apps if no args are specified'
 
     def handle(self, *args, **options):
+        verbosity = int(options.get('verbosity', 0))
+        models = apps.get_models()
+
         if not args:
-            apps = []
-            for model in get_models():
-                apps.append(get_app(model._meta.app_label))
+            app_labels = [model._meta.app_label for model in models]
         else:
-            apps = []
-            for arg in args:
-                apps.append(get_app(arg))
-        for app in apps:
-            create_permissions(app, get_models(), int(options.get('verbosity', 0)))
+            app_labels = [arg for arg in args]
+
+        for app_label in app_labels:
+            try:
+                app_config = apps.get_app_config(app_label)
+            except LookupError:
+                continue
+
+            create_permissions(app_config, models, verbosity)

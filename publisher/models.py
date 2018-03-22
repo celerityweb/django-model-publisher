@@ -186,6 +186,7 @@ class PublisherModelBase(models.Model):
     def revert_to_public(self):
         """
         Revert the draft to the published object without losing the PK.
+        @todo: maybe handle relations one day...
         """
         if not self.publisher_linked:
             return
@@ -193,12 +194,18 @@ class PublisherModelBase(models.Model):
         # Get published obj and remember details about the draft
         draft_obj = self
         publish_obj = self.publisher_linked
-        old_draft = deepcopy(draft_obj)
+        old_pk = draft_obj.pk
+
+        # Build list of draft placeholders
+        placeholders = []
+        for field in self.get_placeholder_fields(draft_obj):
+            placeholder = getattr(draft_obj, field)
+            placeholders.append(placeholder.pk)
 
         # Deep copy the published object into a draft
         draft_obj = deepcopy(publish_obj)
         draft_obj.publisher_linked = publish_obj
-        draft_obj.pk = old_draft.pk
+        draft_obj.pk = old_pk
         publish_obj = None
 
         # Re-publish the "new" draft object
@@ -206,17 +213,14 @@ class PublisherModelBase(models.Model):
         draft_obj.save()
         draft_obj.publish()
 
-        # wipe out old draft's publisher_linked and slug
-        old_draft.pk = None
-        old_draft.publisher_linked = None
+        # Remove orphaned placeholders and plugins
+        try:
+            from cms.models.placeholdermodel import Placeholder
 
-        # remove orphaned placeholders and plugins
-        for field in self.get_placeholder_fields(old_draft):
-            placeholder = getattr(old_draft, field)
-            placeholder.delete()
-
-        # done with old_draft
-        old_draft = None
+            for placeholder in placeholders:
+                Placeholder.objects.get(pk=placeholder).delete()
+        except ImportError:
+            return draft_obj
 
         return draft_obj
 

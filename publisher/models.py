@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from copy import deepcopy
+
 from django.utils import timezone
 from django.db import models
 from django.core.exceptions import ObjectDoesNotExist
@@ -183,29 +185,42 @@ class PublisherModelBase(models.Model):
     @assert_draft
     def revert_to_public(self):
         """
-        @todo Relook at this method. It would be nice if the draft pk did not have to change
-        @toavoid Updates self to a alternative instance
-        @toavoid self.__class__ = draft_obj.__class__
-        @toavoid self.__dict__ = draft_obj.__dict__
+        Revert the draft to the published object without losing the PK.
+        @todo: maybe handle relations one day...
         """
         if not self.publisher_linked:
             return
 
-        # Get published obj and delete the draft
+        # Get published obj and remember details about the draft
         draft_obj = self
         publish_obj = self.publisher_linked
+        old_pk = draft_obj.pk
 
-        draft_obj.publisher_linked = None
-        draft_obj.save()
-        draft_obj.delete()
+        # Build list of draft placeholders
+        placeholders = []
+        for field in self.get_placeholder_fields(draft_obj):
+            placeholder = getattr(draft_obj, field)
+            placeholders.append(placeholder.pk)
 
-        # Mark the published object as a draft
-        draft_obj = publish_obj
+        # Deep copy the published object into a draft
+        draft_obj = deepcopy(publish_obj)
+        draft_obj.publisher_linked = publish_obj
+        draft_obj.pk = old_pk
         publish_obj = None
 
+        # Re-publish the "new" draft object
         draft_obj.publisher_is_draft = draft_obj.STATE_DRAFT
         draft_obj.save()
         draft_obj.publish()
+
+        # Remove orphaned placeholders and plugins
+        try:
+            from cms.models.placeholdermodel import Placeholder
+
+            for placeholder in placeholders:
+                Placeholder.objects.get(pk=placeholder).delete()
+        except ImportError:
+            return draft_obj
 
         return draft_obj
 

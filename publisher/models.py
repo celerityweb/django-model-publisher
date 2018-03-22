@@ -1,5 +1,7 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
+from copy import deepcopy
+
 from django.utils import timezone
 from django.db import models
 from django.core.exceptions import ObjectDoesNotExist
@@ -183,29 +185,38 @@ class PublisherModelBase(models.Model):
     @assert_draft
     def revert_to_public(self):
         """
-        @todo Relook at this method. It would be nice if the draft pk did not have to change
-        @toavoid Updates self to a alternative instance
-        @toavoid self.__class__ = draft_obj.__class__
-        @toavoid self.__dict__ = draft_obj.__dict__
+        Revert the draft to the published object without losing the PK.
         """
         if not self.publisher_linked:
             return
 
-        # Get published obj and delete the draft
+        # Get published obj and remember details about the draft
         draft_obj = self
         publish_obj = self.publisher_linked
+        old_draft = deepcopy(draft_obj)
 
-        draft_obj.publisher_linked = None
-        draft_obj.save()
-        draft_obj.delete()
-
-        # Mark the published object as a draft
-        draft_obj = publish_obj
+        # Deep copy the published object into a draft
+        draft_obj = deepcopy(publish_obj)
+        draft_obj.publisher_linked = publish_obj
+        draft_obj.pk = old_draft.pk
         publish_obj = None
 
+        # Re-publish the "new" draft object
         draft_obj.publisher_is_draft = draft_obj.STATE_DRAFT
         draft_obj.save()
         draft_obj.publish()
+
+        # wipe out old draft's publisher_linked and slug
+        old_draft.pk = None
+        old_draft.publisher_linked = None
+
+        # remove orphaned placeholders and plugins
+        for field in self.get_placeholder_fields(old_draft):
+            placeholder = getattr(old_draft, field)
+            placeholder.delete()
+
+        # done with old_draft
+        old_draft = None
 
         return draft_obj
 

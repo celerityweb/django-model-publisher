@@ -186,7 +186,11 @@ class PublisherModelBase(models.Model):
     def revert_to_public(self):
         """
         Revert the draft to the published object without losing the PK.
-        @todo: maybe handle relations one day...
+        Assumes that:
+        - we're using DjangoCMS (though placeholder code will not error out)
+        - patch_placeholder 'fixes' any issues with foreign keys from deepcopy
+        - relations are handled by each model (similar to clone_relations)
+        @todo Handle orphaned translations, if any.
         """
         if not self.publisher_linked:
             return
@@ -202,25 +206,24 @@ class PublisherModelBase(models.Model):
             placeholder = getattr(draft_obj, field)
             placeholders.append(placeholder.pk)
 
-        # Deep copy the published object into a draft
+        # Deep copy the published object into a draft, setting the old PK
         draft_obj = deepcopy(publish_obj)
         draft_obj.publisher_linked = publish_obj
         draft_obj.pk = old_pk
         publish_obj = None
 
-        # Re-publish the "new" draft object
+        # Save and re-publish the "new" draft object
         draft_obj.publisher_is_draft = draft_obj.STATE_DRAFT
         draft_obj.save()
         draft_obj.publish()
 
         # Remove orphaned placeholders and plugins
+        # Note: doing this breaks django-reversion
         try:
             from cms.models.placeholdermodel import Placeholder
-
-            for placeholder in placeholders:
-                Placeholder.objects.get(pk=placeholder).delete()
-        except ImportError:
-            return draft_obj
+            Placeholder.objects.filter(pk__in=placeholders).delete()
+        except (Exception, ):
+            pass
 
         return draft_obj
 

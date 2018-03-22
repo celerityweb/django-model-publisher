@@ -10,7 +10,7 @@ To restrict publish access to your model, add 'PublisherModel.Meta' to your mode
                pass
 
 
-Then run the following management command::
+Then run the following management command (requires django-extensions)::
 
     python manage.py update_permissions
 

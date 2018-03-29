@@ -1,7 +1,5 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-from copy import deepcopy
-
 from django.utils import timezone
 from django.db import models
 from django.core.exceptions import ObjectDoesNotExist
@@ -14,6 +12,8 @@ from .signals import (
     publisher_post_publish,
     publisher_pre_unpublish,
     publisher_post_unpublish,
+    publisher_pre_revert_to_live,
+    publisher_post_revert_to_live
 )
 from .utils import assert_draft
 
@@ -185,45 +185,37 @@ class PublisherModelBase(models.Model):
     @assert_draft
     def revert_to_public(self):
         """
-        Revert the draft to the published object without losing the PK.
-        Assumes that:
-        - we're using DjangoCMS (though placeholder code will not error out)
-        - patch_placeholder 'fixes' any issues with foreign keys from deepcopy
-        - relations are handled by each model (similar to clone_relations)
-        @todo Handle orphaned translations, if any.
+        Reverts the draft to the published object.
+        The PK will change after revert, breaking any FK relationships.
+        Models that implement publisher can use the pre_revert_to_live and
+        post_revert_to_live signals to address this.
         """
         if not self.publisher_linked:
             return
 
-        # Get published obj and remember details about the draft
+        # Get published object
         draft_obj = self
         publish_obj = self.publisher_linked
-        old_pk = draft_obj.pk
 
-        # Build list of draft placeholders
-        placeholders = []
-        for field in self.get_placeholder_fields(draft_obj):
-            placeholder = getattr(draft_obj, field)
-            placeholders.append(placeholder.pk)
+        # Fire signal to allow models to handle the PK changing
+        publisher_pre_revert_to_live.send(sender=self.__class__, instance=self)
 
-        # Deep copy the published object into a draft, setting the old PK
-        draft_obj = deepcopy(publish_obj)
-        draft_obj.publisher_linked = publish_obj
-        draft_obj.pk = old_pk
+        # Remove FK to published version and delete
+        draft_obj.publisher_linked = None
+        draft_obj.save()
+        draft_obj.delete()
+
+        # Mark the published object as a draft
+        draft_obj = publish_obj
         publish_obj = None
 
-        # Save and re-publish the "new" draft object
+        # Reset the draft status and save / publish
         draft_obj.publisher_is_draft = draft_obj.STATE_DRAFT
         draft_obj.save()
         draft_obj.publish()
 
-        # Remove orphaned placeholders and plugins
-        # Note: doing this breaks django-reversion
-        try:
-            from cms.models.placeholdermodel import Placeholder
-            Placeholder.objects.filter(pk__in=placeholders).delete()
-        except (Exception, ):
-            pass
+        # Fire signal to handle post-publish actions
+        publisher_post_revert_to_live.send(sender=self.__class__, instance=self)
 
         return draft_obj
 

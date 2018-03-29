@@ -29,3 +29,11 @@ publisher_pre_unpublish = Signal(providing_args=['instance'])
 
 # Sent when a model is unpublished (the draft is sent).
 publisher_post_unpublish = Signal(providing_args=['instance'])
+
+
+# Sent before a draft is deleted and the published object becomes the new draft.
+publisher_pre_revert_to_live = Signal(providing_args=['instance'])
+
+
+# Sent after a draft is deleted and the published object becomes the new draft.
+publisher_post_revert_to_live = Signal(providing_args=['instance'])
